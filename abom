@@ -4,7 +4,7 @@ import re
 from sys import argv, exit
 from subprocess import run
 from shlex import split as shlex_split, join
-from os import environ, remove
+from os import environ
 from bloom_filter2 import BloomFilter
 from hashlib import file_digest
 from tempfile import NamedTemporaryFile
