@@ -7,6 +7,7 @@ This repository implements ABOM as a clang wrapper.
 ```bash
 pip install -r requirements.txt
 ```
+Note that clang and llvm-objcopy must both be avilable in the PATH.
 
 ## Usage
 
