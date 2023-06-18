@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import re
+import gzip
 from sys import argv, exit
 from subprocess import run
 from shlex import split as shlex_split, join
@@ -8,6 +9,7 @@ from os import environ
 from bloom_filter2 import BloomFilter
 from hashlib import file_digest
 from tempfile import NamedTemporaryFile
+from shutil import copyfileobj
 
 def main():
     # Validate arguments
@@ -64,10 +66,13 @@ def main():
                     with open(dep, 'rb') as f:
                         hash = file_digest(f, "sha3_256")
                     bf.add(hash.hexdigest())
-            # Create Bloom Filter Object File
-            obj = run(f'echo ".section __ABOM,__abom\n.incbin \\"{bf_file.name}\\"" | clang -c -x assembler -o {bf_obj_file.name} -', shell=True)
-            if obj.returncode != 0:
-                exit("Could not create object file.")
+            with NamedTemporaryFile() as bf_gz:
+                with gzip.open(bf_gz.name, 'wb') as gz:
+                    copyfileobj(bf_file, gz)
+                # Create Bloom Filter Object File
+                obj = run(f'echo ".section __ABOM,__abom\n.incbin \\"{bf_gz.name}\\"" | clang -c -x assembler -o {bf_obj_file.name} -', shell=True)
+                if obj.returncode != 0:
+                    exit("Could not create object file.")
         # Add Bloom Filter Object File to Linker
         compile = cmds[4:-1] + [join(ld + [bf_obj_file.name])]
         # Run Compilation
