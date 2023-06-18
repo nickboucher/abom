@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+
+import re
+from sys import argv, exit
+from subprocess import run
+from shlex import split as shlex_split, join
+from os import environ, remove
+from bloom_filter2 import BloomFilter
+from hashlib import file_digest
+
+def main():
+    # Validate arguments
+    if len(argv) <= 1:
+        exit("Usage: abom <clang> [clang-args]")
+    if 'clang' not in argv[1]:
+        exit("clang is only supported compiler.")
+    # Set verbosity
+    verbose = environ.get('ABOM_VERBOSE') == '1'
+    # Get Output File
+    cmds = run([argv[1]] + ['-###'] + argv[2:], capture_output=True, text=True)
+    cmds = cmds.stderr.rstrip('\n').split('\n')
+    ld = shlex_split(cmds[-1])
+    if len(ld) < 1 or 'ld' not in ld[0]:
+        exit("Could not find linker command.")
+    try:
+        idx = ld.index('-o')
+        if idx+1 > len(ld):
+            raise ValueError
+    except ValueError:
+        exit("Linker output could not be determined.")
+    out = ld[idx+1]
+    if verbose:
+        print("Output: " + out)
+    # Gather Dependencies
+    o = argv[1:]
+    try:
+        idx = o.index('-o')
+        if idx+1 > len(o):
+            raise ValueError
+        o = o[:idx] + o[idx+2:]
+    except ValueError:
+        pass
+    deps = run([o[0]] + ['-M'] + o[1:], capture_output=True, text=True)
+    dependencies = set()
+    # Parse Dependencies
+    for inputs in re.split(r'(?<!\\)\n(?!$)', deps.stdout):
+        input = re.split(r'\ \\\n\ \ ', inputs.rstrip('\n'))
+        if len(input) < 1:
+            continue
+        output,source = input[0].split(': ')
+        file_deps = [source] + input[1:]
+        dependencies.update(file_deps)
+        if verbose:
+            print("\nObject: " + output)
+            print("Dependencies:")
+            print('\n'.join(map(lambda x: f'\t{x}',file_deps))) 
+    # Create Bloom Filter
+    bf_file = f'{out}.abom'
+    bf = BloomFilter(max_elements=100000, error_rate=1e-7, filename=(bf_file,-1))
+    for dep in dependencies:
+        with open(dep, 'rb') as f:
+            hash = file_digest(f, "sha3_256")
+        bf.add(hash.hexdigest())
+    bf.close()
+    # Create Bloom Filter Object File
+    bf_obj_file = f'{bf_file}.o'
+    obj = run(f'echo ".section __ABOM,__abom\n.incbin \\"{bf_file}\\"" | clang -c -x assembler -o {bf_obj_file} -', shell=True)
+    if obj.returncode != 0:
+        exit("Could not create object file.")
+    # Remove Bloom Filter File
+    remove(bf_file)
+    # Add Bloom Filter Object File to Linker
+    compile = cmds[4:-1] + [join(ld + [bf_obj_file])]
+    # Run Compilation
+    for cmd in compile:
+        run(cmd, shell=True)
+    # Remove Bloom Filter Object File
+    remove(bf_obj_file)
+
+if __name__ == '__main__':
+    main()
