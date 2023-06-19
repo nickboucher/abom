@@ -59,7 +59,7 @@ def main():
         if len(input) < 1:
             continue
         output,source = input[0].split(': ')
-        file_deps = [source] + input[1:]
+        file_deps = shlex_split(source) + input[1:]
         dependencies.update(file_deps)
         if verbose:
             print("\nObject: " + output)
