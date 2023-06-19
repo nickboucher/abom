@@ -2,6 +2,7 @@
 
 import re
 import gzip
+import warnings
 from sys import argv, exit
 from subprocess import run
 from shlex import split as shlex_split, join
@@ -10,6 +11,10 @@ from bloom_filter2 import BloomFilter
 from hashlib import file_digest
 from tempfile import NamedTemporaryFile
 from shutil import copyfileobj
+from os.path import isfile
+from termcolor import colored
+
+warnings.formatwarning = lambda message, *a: f"{colored('Warning', 'red')}: {message}\n"
 
 def main():
     # Validate arguments
@@ -22,17 +27,19 @@ def main():
     # Get Output File
     cmd = run([argv[1]] + ['-###'] + argv[2:], capture_output=True, text=True)
     cmds = cmd.stderr.rstrip('\n').split('\n')
-    ld = shlex_split(cmds[-1])
-    if len(ld) < 1 or 'ld' not in ld[0]:
+    if len(cmds) < 1:
         print(cmd.stderr)
-        exit("Could not find linker command.")
+        exit("No compiler commands found.")
+    last = shlex_split(cmds[-1])
+    ld = 'ld' in last[0]
     try:
-        idx = ld.index('-o')
-        if idx+1 > len(ld):
+        idx = last.index('-o')
+        if idx+1 > len(last):
             raise ValueError
     except ValueError:
-        exit("Linker output could not be determined.")
-    out = ld[idx+1]
+        print(cmd.stderr)
+        exit("Output file could not be determined.")
+    out = last[idx+1]
     if verbose:
         print("Output: " + out)
     # Gather Dependencies
@@ -58,14 +65,32 @@ def main():
             print("\nObject: " + output)
             print("Dependencies:")
             print('\n'.join(map(lambda x: f'\t{x}',file_deps))) 
+    if verbose:
+        print()
     # Create Bloom Filter
-    with NamedTemporaryFile() as bf_obj_file:
+    with NamedTemporaryFile(suffix='.o') as bf_obj_file:
         with NamedTemporaryFile() as bf_file:
             with BloomFilter(max_elements=100000, error_rate=1e-7, filename=(bf_file.name,-1)) as bf:
                 for dep in dependencies:
                     with open(dep, 'rb') as f:
                         hash = file_digest(f, "sha3_256")
                     bf.add(hash.hexdigest())
+                if ld:
+                    with NamedTemporaryFile() as ln_gz:
+                        for option in last[1:]:
+                            if option != out and isfile(option):
+                                objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={ln_gz.name} {option}', shell=True, capture_output=True)
+                                if objcopy.returncode == 0:
+                                    if verbose:
+                                        print(f"Merging Linked Object ABOM: {option}")
+                                    with NamedTemporaryFile() as ln:
+                                        with gzip.open(ln_gz.name, 'rb') as gz:
+                                            copyfileobj(gz, ln)
+                                        ln.seek(0)
+                                        hash = file_digest(ln, "sha3_256")
+                                    bf.add(hash.hexdigest())
+                                else:
+                                    warnings.warn(f"Linked object lacks ABOM: {option}", category=RuntimeWarning)
             with NamedTemporaryFile() as bf_gz:
                 with gzip.open(bf_gz.name, 'wb') as gz:
                     copyfileobj(bf_file, gz)
@@ -73,11 +98,16 @@ def main():
                 obj = run(f'echo ".section __ABOM,__abom\n.incbin \\"{bf_gz.name}\\"" | clang -c -x assembler -o {bf_obj_file.name} -', shell=True)
                 if obj.returncode != 0:
                     exit("Could not create object file.")
-        # Add Bloom Filter Object File to Linker
-        compile = cmds[4:-1] + [join(ld + [bf_obj_file.name])]
+        if ld:
+            # Add Bloom Filter Object File to Linker
+            compile = cmds[4:-1] + [join(last + [bf_obj_file.name])]
+        else:
+            # Add relocatable linker command to merge object files
+            compile = cmds[4:] + [f'ld -r -o {out} {out} {bf_obj_file.name}']
         # Run Compilation
         for cmd in compile:
-            run(cmd, shell=True)
+            out = run(cmd, shell=True, capture_output=True, text=True)
+            print(out.stderr, end='')
 
 if __name__ == '__main__':
     main()

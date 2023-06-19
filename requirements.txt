@@ -1,1 +1,2 @@
 bloom_filter2
+termcolor
