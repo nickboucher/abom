@@ -14,7 +14,7 @@ from shutil import copyfileobj
 from os.path import isfile
 from termcolor import colored
 
-warnings.formatwarning = lambda message, *a: f"{colored('Warning', 'red')}: {message}\n"
+warnings.formatwarning = lambda message, *_: f"{colored('Warning', 'red')}: {message}\n"
 
 def main():
     # Validate arguments
