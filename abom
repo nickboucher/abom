@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import re
-import gzip
 import warnings
 from sys import argv, exit
 from subprocess import run
@@ -10,9 +9,9 @@ from os import environ
 from bloom_filter2 import BloomFilter
 from hashlib import file_digest
 from tempfile import NamedTemporaryFile
-from shutil import copyfileobj
 from os.path import isfile
 from termcolor import colored
+from zlib import compress, decompress
 
 warnings.formatwarning = lambda message, *_: f"{colored('Warning', 'red')}: {message}\n"
 
@@ -84,16 +83,21 @@ def main():
                                     if verbose:
                                         print(f"Merging Linked Object ABOM: {option}")
                                     with NamedTemporaryFile() as ln:
-                                        with gzip.open(ln_gz.name, 'rb') as gz:
-                                            copyfileobj(gz, ln)
-                                        ln.seek(0)
+                                        if ln_gz.read(6) != b"ABOM\x01\x01":
+                                            exit("Invalid ABOM Header.")
+                                        bf_file.write(decompress(ln.read()))
+                                        bf_file.flush()
                                         hash = file_digest(ln, "sha3_256")
                                     bf.add(hash.hexdigest())
                                 else:
                                     warnings.warn(f"Linked object lacks ABOM: {option}", category=RuntimeWarning)
             with NamedTemporaryFile() as bf_gz:
-                with gzip.open(bf_gz.name, 'wb') as gz:
-                    copyfileobj(bf_file, gz)
+                # Write ABOM Header ('ABOM',version,num_filters)
+                bf_gz.write(b"ABOM\x01\x01")
+                with open(bf_file.name, 'rb') as bf_f:
+                    # Compress Bloom Filter
+                    bf_gz.write(compress(bf_f.read()))
+                bf_gz.flush()
                 # Create Bloom Filter Object File
                 obj = run(f'echo ".section __ABOM,__abom\n.incbin \\"{bf_gz.name}\\"" | clang -c -x assembler -o {bf_obj_file.name} -', shell=True)
                 if obj.returncode != 0:
