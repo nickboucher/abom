@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from sys import argv, exit
 from os import environ
 from subprocess import run
@@ -7,7 +5,7 @@ from tempfile import NamedTemporaryFile
 from bloom_filter2 import BloomFilter
 from zlib import decompress
 
-def main():
+def check():
     # Validate arguments
     if len(argv) != 3:
         exit("Usage: abom-check <binary> <hash>")
@@ -32,6 +30,3 @@ def main():
                 print("Present")
             else:
                 print("Absent")
-
-if __name__ == '__main__':
-    main()

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import re
 import warnings
 from sys import argv, exit
@@ -15,7 +13,7 @@ from zlib import compress, decompress
 
 warnings.formatwarning = lambda message, *_: f"{colored('Warning', 'red')}: {message}\n"
 
-def main():
+def compile():
     # Validate arguments
     if len(argv) <= 1:
         exit("Usage: abom <clang> [clang-args]")
