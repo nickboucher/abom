@@ -1,6 +1,6 @@
 import re
 import warnings
-from sys import argv, exit
+from sys import argv as sysargv, exit
 from subprocess import run
 from shlex import split as shlex_split, join
 from os import environ
@@ -8,12 +8,15 @@ from bloom_filter2 import BloomFilter
 from hashlib import file_digest
 from tempfile import NamedTemporaryFile
 from os.path import isfile
-from termcolor import colored
 from zlib import compress, decompress
+from helpers import AbomMissingWarning
 
-warnings.formatwarning = lambda message, *_: f"{colored('Warning', 'red')}: {message}\n"
-
-def compile():
+def compile(cmd=None):
+    # Rewrite compile command if unittesting
+    if cmd is not None:
+        argv = shlex_split(cmd)
+    else:
+        argv = sysargv
     # Validate arguments
     if len(argv) <= 1:
         exit("Usage: abom <clang> [clang-args]")
@@ -52,10 +55,11 @@ def compile():
     dependencies = set()
     # Parse Dependencies
     for inputs in re.split(r'(?<!\\)\n(?!$)', deps.stdout):
-        input = re.split(r'\ \\\n\ \ ', inputs.rstrip('\n'))
+        input = re.split(r'\\\n\ \ ', inputs.rstrip('\n'))
+        input = list(map(lambda x: x.rstrip(' '), input))
         if len(input) < 1:
             continue
-        output,source = input[0].split(': ')
+        output,source = input[0].split(':')
         file_deps = shlex_split(source) + input[1:]
         dependencies.update(file_deps)
         if verbose:
@@ -88,7 +92,7 @@ def compile():
                                         hash = file_digest(ln, "sha3_256")
                                     bf.add(hash.hexdigest())
                                 else:
-                                    warnings.warn(f"Linked object lacks ABOM: {option}", category=RuntimeWarning)
+                                    warnings.warn(f"Linked object lacks ABOM: {option}", category=AbomMissingWarning)
             with NamedTemporaryFile() as bf_gz:
                 # Write ABOM Header ('ABOM',version,num_filters)
                 bf_gz.write(b"ABOM\x01\x01")
@@ -110,6 +114,3 @@ def compile():
         for cmd in compile:
             out = run(cmd, shell=True, capture_output=True, text=True)
             print(out.stderr, end='')
-
-if __name__ == '__main__':
-    main()

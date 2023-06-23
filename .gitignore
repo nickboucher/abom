@@ -1,8 +1,9 @@
 # ABOM-specific files
-.vscode
-tests
 *.out
 *.abom
+
+# Visual Studio Code
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

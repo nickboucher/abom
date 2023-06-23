@@ -1,2 +1,2 @@
-from compile import compile
-from check import check
+from .compile import compile
+from .check import check

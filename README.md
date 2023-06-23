@@ -5,7 +5,7 @@ This repository implements ABOM as a clang wrapper.
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 Note that clang and llvm-objcopy must both be avilable in the PATH.
 
@@ -13,10 +13,17 @@ Note that clang and llvm-objcopy must both be avilable in the PATH.
 
 To compile a program with ABOM, run the following command:
 ```bash
-./abom CLANG_CMD
+abom CLANG_CMD
 ```
 
 To check whether a certain dependency is present in the ABOM-compiled program, run the following command:
 ```bash
-./abom-check <binary> <dependency>
+abom-check <binary> <dependency>
+```
+
+## Tests
+
+To run unit tests, run the following command from the root directory:
+```bash
+python -m unittest
 ```

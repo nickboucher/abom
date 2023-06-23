@@ -5,6 +5,7 @@ with open('README.md', 'r', encoding='utf-8') as fh:
 
 setuptools.setup(
     name='abom-clang',
+    version='0.1',
     author='Nicholas Boucher',
     author_email='nicholas.boucher@cl.cam.ac.uk',
     description='Automatic Bill of Materials for clang',

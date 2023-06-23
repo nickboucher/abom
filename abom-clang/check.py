@@ -1,11 +1,17 @@
-from sys import argv, exit
+from sys import argv as sysargv, exit
+from shlex import split as shlex_split
 from os import environ
 from subprocess import run
 from tempfile import NamedTemporaryFile
 from bloom_filter2 import BloomFilter
 from zlib import decompress
 
-def check():
+def check(cmd=None):
+    # Rewrite check command if unittesting
+    if cmd is not None:
+        argv = shlex_split(cmd)
+    else:
+        argv = sysargv
     # Validate arguments
     if len(argv) != 3:
         exit("Usage: abom-check <binary> <hash>")
