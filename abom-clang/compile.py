@@ -2,7 +2,7 @@ import re
 import warnings
 from sys import argv as sysargv, exit
 from subprocess import run
-from shlex import split as shlex_split, join
+from shlex import split as shlex_split, join as shlex_join
 from os import environ
 from bloom_filter2 import BloomFilter
 from hashlib import file_digest
@@ -10,6 +10,7 @@ from tempfile import NamedTemporaryFile
 from os.path import isfile
 from zlib import compress, decompress
 from helpers import AbomMissingWarning
+
 
 def compile(cmd=None):
     # Rewrite compile command if unittesting
@@ -43,7 +44,16 @@ def compile(cmd=None):
     if verbose:
         print("Output: " + out)
     # Gather Dependencies
-    o = argv[1:]
+    o = []
+    args = argv[1:]
+    n = 0
+    while n < len(args):
+        # Remove dependency generation flags
+        if args[n] in ['-MT', '-MQ', '-MJ', '-MF']:
+            n += 1
+        elif args[n] not in ['-M', '--dependencies', '-MD', '--write-dependencies', '-MG', '--print-missing-file-dependencies', '-MM', '--user-dependencies', '-MMD', '--write-user-dependencies', '-MP', '-MV']:
+            o.append(args[n])
+        n += 1
     try:
         idx = o.index('-o')
         if idx+1 > len(o):
@@ -55,12 +65,16 @@ def compile(cmd=None):
     dependencies = set()
     # Parse Dependencies
     for inputs in re.split(r'(?<!\\)\n(?!$)', deps.stdout):
-        input = re.split(r'\\\n\ \ ', inputs.rstrip('\n'))
-        input = list(map(lambda x: x.rstrip(' '), input))
-        if len(input) < 1:
+        if inputs == '':
             continue
-        output,source = input[0].split(':')
-        file_deps = shlex_split(source) + input[1:]
+        inp = re.split(r'\\\n\ \ ', inputs.rstrip('\n'))
+        inp = list(map(lambda x: x.rstrip(' '), inp))
+        if len(inp) < 1:
+            continue
+        output,source = inp[0].split(':')
+        file_deps = shlex_split(source)
+        for dep in inp[1:]:
+            file_deps += shlex_split(dep)
         dependencies.update(file_deps)
         if verbose:
             print("\nObject: " + output)
@@ -69,48 +83,60 @@ def compile(cmd=None):
     if verbose:
         print()
     # Create Bloom Filter
-    with NamedTemporaryFile(suffix='.o') as bf_obj_file:
-        with NamedTemporaryFile() as bf_file:
-            with BloomFilter(max_elements=100000, error_rate=1e-7, filename=(bf_file.name,-1)) as bf:
-                for dep in dependencies:
-                    with open(dep, 'rb') as f:
-                        hash = file_digest(f, "sha3_256")
-                    bf.add(hash.hexdigest())
-                if ld:
-                    with NamedTemporaryFile() as ln_gz:
-                        for option in last[1:]:
-                            if option != out and isfile(option):
-                                objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={ln_gz.name} {option}', shell=True, capture_output=True)
-                                if objcopy.returncode == 0:
-                                    if verbose:
-                                        print(f"Merging Linked Object ABOM: {option}")
-                                    with NamedTemporaryFile() as ln:
-                                        if ln_gz.read(6) != b"ABOM\x01\x01":
+    with NamedTemporaryFile() as bf_file:
+        with BloomFilter(max_elements=100000, error_rate=1e-7, filename=(bf_file.name,-1)) as bf:
+            for dep in dependencies:
+                if dep.endswith('.s'):
+                    warnings.warn("Assembly files are not supported.", category=AbomMissingWarning)
+                    run(shlex_join(argv[1:]), shell=True)
+                    exit(0)
+                with open(dep, 'rb') as f:
+                    hash = file_digest(f, "sha3_256")
+                bf.add(hash.hexdigest())
+            if ld:
+                with NamedTemporaryFile() as ln_gz:
+                    for option in last[1:]:
+                        if option != out and isfile(option):
+                            objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={ln_gz.name} {option}', shell=True, capture_output=True)
+                            if objcopy.returncode == 0:
+                                if verbose:
+                                    print(f"Merging Linked Object ABOM: {option}")
+                                with NamedTemporaryFile() as ln:
+                                    with open(ln_gz.name, 'rb') as comp:
+                                        if comp.read(6) != b"ABOM\x01\x01":
                                             exit("Invalid ABOM Header.")
-                                        bf_file.write(decompress(ln.read()))
-                                        bf_file.flush()
-                                        hash = file_digest(ln, "sha3_256")
-                                    bf.add(hash.hexdigest())
-                                else:
-                                    warnings.warn(f"Linked object lacks ABOM: {option}", category=AbomMissingWarning)
-            with NamedTemporaryFile() as bf_gz:
-                # Write ABOM Header ('ABOM',version,num_filters)
-                bf_gz.write(b"ABOM\x01\x01")
-                with open(bf_file.name, 'rb') as bf_f:
-                    # Compress Bloom Filter
-                    bf_gz.write(compress(bf_f.read()))
-                bf_gz.flush()
-                # Create Bloom Filter Object File
-                obj = run(f'echo ".section __ABOM,__abom\n.incbin \\"{bf_gz.name}\\"" | clang -c -x assembler -o {bf_obj_file.name} -', shell=True)
-                if obj.returncode != 0:
-                    exit("Could not create object file.")
-        if ld:
-            # Add Bloom Filter Object File to Linker
-            compile = cmds[4:-1] + [join(last + [bf_obj_file.name])]
-        else:
-            # Add relocatable linker command to merge object files
-            compile = cmds[4:] + [f'ld -r -o {out} {out} {bf_obj_file.name}']
-        # Run Compilation
-        for cmd in compile:
-            out = run(cmd, shell=True, capture_output=True, text=True)
-            print(out.stderr, end='')
+                                        ln.write(decompress(comp.read()))
+                                        ln.flush()
+                                        with BloomFilter(max_elements=100000, error_rate=1e-7, filename=(ln.name,-1)) as bf2:
+                                            bf.union(bf2)
+                            else:
+                                warnings.warn(f"Linked object lacks ABOM: {option}", category=AbomMissingWarning)
+        with NamedTemporaryFile() as bf_gz:
+            # Write ABOM Header ('ABOM',version,num_filters)
+            bf_gz.write(b"ABOM\x01\x01")
+            with open(bf_file.name, 'rb') as bf_f:
+                # Compress Bloom Filter
+                bf_gz.write(compress(bf_f.read()))
+            bf_gz.flush()
+            # Run Compilation
+            for cmd in cmds[4:]:
+                if verbose:
+                    print(f"Running Command:\n{cmd}\n")
+                comp = run(cmd, shell=True, capture_output=True, text=True)
+                print(comp.stderr, end='')
+            # Remove stale ABOMs
+            rm = run(f'llvm-objcopy --remove-section=__ABOM,__abom --remove-section=,__abom {out}', shell=True, capture_output=True)
+            if rm.returncode != 0:
+               warnings.warn("Failed to remove ABOM sections from dependencies.", category=AbomMissingWarning)
+            # Add ABOM to output
+            is_obj = run(f'file -b {out}', shell=True, capture_output=True, text=True)
+            if is_obj.returncode != 0:
+                exit(f"Failed to determine if {out} is executable.")
+            if 'object' in is_obj.stdout:
+                add = run(f'ld -r -sectcreate __ABOM __abom {bf_gz.name} {out} -o {out}', shell=True, capture_output=True)
+                if add.returncode != 0:
+                    warnings.warn("Failed to add ABOM section to object output.", category=AbomMissingWarning)
+            else:
+                add = run(f'llvm-objcopy --add-section=__ABOM,__abom={bf_gz.name} {out}', shell=True, capture_output=True)
+                if add.returncode != 0:
+                    warnings.warn("Failed to add ABOM section to executable output.", category=AbomMissingWarning)
