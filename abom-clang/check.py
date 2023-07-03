@@ -1,6 +1,7 @@
 from sys import argv as sysargv, exit
 from shlex import split as shlex_split
 from os import environ
+from os.path import isfile
 from subprocess import run
 from tempfile import NamedTemporaryFile
 from bloom_filter2 import BloomFilter
@@ -22,9 +23,19 @@ def check(cmd=None):
     with NamedTemporaryFile() as bf_file:
         with NamedTemporaryFile() as bf_gz:
             hash = argv[2]
-            extract = run(f'llvm-objcopy --dump-section=__ABOM,__abom={bf_gz.name} {binary}', shell=True)
-            if extract.returncode != 0:
-                exit("Could not extract Bloom Filter.")
+            abom_available = False
+            if isfile(f'{binary}.abom'):
+                cp = run(f'cp {binary}.abom {bf_gz.name}', shell=True, capture_output=True)
+                if cp.returncode == 0:
+                    abom_available = True
+                    if verbose:
+                        print(f"Using dedicated ABOM file instead of embedded binary: {binary}.abom")
+            if not abom_available:
+                extract = run(f'llvm-objcopy --dump-section=__ABOM,__abom={bf_gz.name} {binary}', shell=True, capture_output=True)
+                if extract.returncode != 0:
+                    if verbose:
+                        print("Could not extract Bloom Filter.")
+                    exit(f"Input lacks ABOM: {binary}")
             with open(bf_gz.name, 'rb') as comp:
                 if comp.read(6) != b"ABOM\x01\x01":
                     exit("Invalid ABOM Header.")

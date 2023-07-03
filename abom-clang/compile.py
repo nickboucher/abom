@@ -84,12 +84,11 @@ def compile(cmd=None):
         print()
     # Create Bloom Filter
     with NamedTemporaryFile() as bf_file:
+        asm = False
         with BloomFilter(max_elements=100000, error_rate=1e-7, filename=(bf_file.name,-1)) as bf:
             for dep in dependencies:
                 if dep.endswith('.s'):
-                    warnings.warn("Assembly files are not supported.", category=AbomMissingWarning)
-                    run(shlex_join(argv[1:]), shell=True)
-                    exit(0)
+                    asm = True
                 with open(dep, 'rb') as f:
                     hash = file_digest(f, "sha3_256")
                 bf.add(hash.hexdigest())
@@ -97,10 +96,22 @@ def compile(cmd=None):
                 with NamedTemporaryFile() as ln_gz:
                     for option in last[1:]:
                         if option != out and isfile(option):
-                            objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={ln_gz.name} {option}', shell=True, capture_output=True)
-                            if objcopy.returncode == 0:
-                                if verbose:
-                                    print(f"Merging Linked Object ABOM: {option}")
+                            abom_available = False
+                            if isfile(f'{option}.abom'):
+                                cp = run(f'cp {option}.abom {ln_gz.name}', shell=True, capture_output=True)
+                                if cp.returncode == 0:
+                                    abom_available = True
+                                    if verbose:
+                                        print(f"Using dedicated ABOM file instead of embedded binary: {option}.abom")
+                                else:
+                                    warnings.warn(f"Failed to load dedicated ABOM file: {option}.abom", category=AbomMissingWarning)
+                            else:
+                                objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={ln_gz.name} {option}', shell=True, capture_output=True)
+                                if objcopy.returncode == 0:
+                                    abom_available = True
+                                    if verbose:
+                                        print(f"Merging Linked Object ABOM: {option}")
+                            if abom_available:
                                 with NamedTemporaryFile() as ln:
                                     with open(ln_gz.name, 'rb') as comp:
                                         if comp.read(6) != b"ABOM\x01\x01":
@@ -132,7 +143,11 @@ def compile(cmd=None):
             is_obj = run(f'file -b {out}', shell=True, capture_output=True, text=True)
             if is_obj.returncode != 0:
                 exit(f"Failed to determine if {out} is executable.")
-            if 'object' in is_obj.stdout:
+            if asm:
+                cp = run(f'cp {bf_gz.name} {out}.abom', shell=True, capture_output=True)
+                if cp.returncode != 0:
+                    warnings.warn("Failed to create seperate ABOM file for assembly inputs.", category=AbomMissingWarning)
+            elif 'object' in is_obj.stdout:
                 add = run(f'ld -r -sectcreate __ABOM __abom {bf_gz.name} {out} -o {out}', shell=True, capture_output=True)
                 if add.returncode != 0:
                     warnings.warn("Failed to add ABOM section to object output.", category=AbomMissingWarning)
