@@ -2,6 +2,10 @@
 *.out
 *.abom
 
+# Object files
+*.o
+*.a
+
 # Visual Studio Code
 .vscode/
 
