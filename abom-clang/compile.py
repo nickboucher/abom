@@ -11,8 +11,18 @@ from os.path import isfile
 from zlib import compress, decompress
 from helpers import AbomMissingWarning
 
+# Define constants
+clang_cmds = ['clang', 'clang++', 'cc', 'c++']
+ar_cmds = ['ar', 'llvm-ar']
+bf_max_elements = 100000
+bf_error_rate = 1e-7
+
+# Set verbosity
+verbose = environ.get('ABOM_VERBOSE') == '1'
+
 
 def compile(cmd=None):
+    """ Defauly entrypoint for building an ABOM. """
     # Rewrite compile command if unittesting
     if cmd is not None:
         argv = shlex_split(cmd)
@@ -20,11 +30,16 @@ def compile(cmd=None):
         argv = sysargv
     # Validate arguments
     if len(argv) <= 1:
-        exit("Usage: abom <clang> [clang-args]")
-    if 'clang' not in argv[1]:
-        exit("clang is only supported compiler.")
-    # Set verbosity
-    verbose = environ.get('ABOM_VERBOSE') == '1'
+        exit("Usage: abom <clang/ar> [args]")
+    elif argv[1] in clang_cmds:
+        compile_clang(argv)
+    elif argv[1] in ar_cmds:
+        compile_ar(argv)
+    else:
+        exit("clang and ar are the only supported tools.")
+    
+def compile_clang(argv):
+    """ Package an ABOM with a clang compilation. """
     # Get Output File
     cmd = run([argv[1]] + ['-###'] + argv[2:], capture_output=True, text=True)
     cmds = cmd.stderr.rstrip('\n').split('\n')
@@ -78,14 +93,11 @@ def compile(cmd=None):
         dependencies.update(file_deps)
         if verbose:
             print("\nObject: " + output)
-            print("Dependencies:")
-            print('\n'.join(map(lambda x: f'\t{x}',file_deps))) 
-    if verbose:
-        print()
+            print("Dependencies:\n" + '\n'.join(map(lambda x: f'\t{x}',file_deps)))
     # Create Bloom Filter
     with NamedTemporaryFile() as bf_file:
         asm = False
-        with BloomFilter(max_elements=100000, error_rate=1e-7, filename=(bf_file.name,-1)) as bf:
+        with BloomFilter(max_elements=bf_max_elements, error_rate=bf_error_rate, filename=(bf_file.name,-1)) as bf:
             for dep in dependencies:
                 if dep.endswith('.s'):
                     asm = True
@@ -93,46 +105,13 @@ def compile(cmd=None):
                     hash = file_digest(f, "sha3_256")
                 bf.add(hash.hexdigest())
             if ld:
-                with NamedTemporaryFile() as ln_gz:
-                    for option in last[1:]:
-                        if option != out and isfile(option):
-                            abom_available = False
-                            if isfile(f'{option}.abom'):
-                                cp = run(f'cp {option}.abom {ln_gz.name}', shell=True, capture_output=True)
-                                if cp.returncode == 0:
-                                    abom_available = True
-                                    if verbose:
-                                        print(f"Using dedicated ABOM file instead of embedded binary: {option}.abom")
-                                else:
-                                    warnings.warn(f"Failed to load dedicated ABOM file: {option}.abom", category=AbomMissingWarning)
-                            else:
-                                objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={ln_gz.name} {option}', shell=True, capture_output=True)
-                                if objcopy.returncode == 0:
-                                    abom_available = True
-                                    if verbose:
-                                        print(f"Merging Linked Object ABOM: {option}")
-                            if abom_available:
-                                with NamedTemporaryFile() as ln:
-                                    with open(ln_gz.name, 'rb') as comp:
-                                        if comp.read(6) != b"ABOM\x01\x01":
-                                            exit("Invalid ABOM Header.")
-                                        ln.write(decompress(comp.read()))
-                                        ln.flush()
-                                        with BloomFilter(max_elements=100000, error_rate=1e-7, filename=(ln.name,-1)) as bf2:
-                                            bf.union(bf2)
-                            else:
-                                warnings.warn(f"Linked object lacks ABOM: {option}", category=AbomMissingWarning)
+                abom_union(bf, last[1:], out)
         with NamedTemporaryFile() as bf_gz:
-            # Write ABOM Header ('ABOM',version,num_filters)
-            bf_gz.write(b"ABOM\x01\x01")
-            with open(bf_file.name, 'rb') as bf_f:
-                # Compress Bloom Filter
-                bf_gz.write(compress(bf_f.read()))
-            bf_gz.flush()
+            write_abom(bf_file.name, bf_gz)
             # Run Compilation
             for cmd in cmds[4:]:
                 if verbose:
-                    print(f"Running Command:\n{cmd}\n")
+                    print(f"\nRunning Command:\n{cmd}\n")
                 comp = run(cmd, shell=True, capture_output=True, text=True)
                 print(comp.stderr, end='')
             # Remove stale ABOMs
@@ -155,3 +134,64 @@ def compile(cmd=None):
                 add = run(f'llvm-objcopy --add-section=__ABOM,__abom={bf_gz.name} {out}', shell=True, capture_output=True)
                 if add.returncode != 0:
                     warnings.warn("Failed to add ABOM section to executable output.", category=AbomMissingWarning)
+
+def compile_ar(argv):
+    """ Build an ABOM for an archive operation. """
+    ar = run(shlex_join(argv[1:]), shell=True)
+    if ar.returncode != 0:
+        exit("Skipping ABOM generation due to archive error.")
+    out = ''
+    n=2
+    while n < len(argv):
+        if isfile(argv[n]):
+            out = argv[n]
+            break
+        n += 1
+    if out == '':
+        exit("Output file could not be determined.")
+    with NamedTemporaryFile() as bf_file:
+        with BloomFilter(max_elements=bf_max_elements, error_rate=bf_error_rate, filename=(bf_file.name,-1)) as bf:
+            abom_union(bf, argv[n+1:], out, operation='Archived')
+        with open(f'{out}.abom', 'wb') as bf_gz:
+            write_abom(bf_file.name, bf_gz)
+
+def abom_union(bf, files, out, operation='Linked'):
+    """ Union the bloom filter `bf` with the potential ABOMs in `files` where `out` is the output file and `operation` is the task being performed. """
+    with NamedTemporaryFile() as gz:
+        for option in files:
+            if option != out and isfile(option):
+                abom_available = False
+                if isfile(f'{option}.abom'):
+                    cp = run(f'cp {option}.abom {gz.name}', shell=True, capture_output=True)
+                    if cp.returncode == 0:
+                        abom_available = True
+                        if verbose:
+                            print(f"Using dedicated ABOM file instead of embedded binary: {option}.abom")
+                    else:
+                        warnings.warn(f"Failed to load dedicated ABOM file: {option}.abom", category=AbomMissingWarning)
+                if not abom_available:
+                    objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={gz.name} {option}', shell=True, capture_output=True)
+                    if objcopy.returncode == 0:
+                        abom_available = True
+                        if verbose:
+                            print(f"Merging Linked Object ABOM: {option}")
+                if abom_available:
+                    with NamedTemporaryFile() as ln:
+                        with open(gz.name, 'rb') as comp:
+                            if comp.read(6) != b"ABOM\x01\x01":
+                                exit("Invalid ABOM Header.")
+                            ln.write(decompress(comp.read()))
+                            ln.flush()
+                            with BloomFilter(max_elements=bf_max_elements, error_rate=bf_error_rate, filename=(ln.name,-1)) as bf2:
+                                bf.union(bf2)
+                else:
+                    warnings.warn(f"{operation} object lacks ABOM: {option}", category=AbomMissingWarning)
+
+def write_abom(bf_filename, f):
+    """ Write the bloom filter saved at `bf_filename` to the file handler `f`. """
+    # Write ABOM Header ('ABOM',version,num_filters)
+    f.write(b"ABOM\x01\x01")
+    with open(bf_filename, 'rb') as bf_f:
+        # Compress Bloom Filter
+        f.write(compress(bf_f.read()))
+    f.flush()
