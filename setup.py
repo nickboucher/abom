@@ -18,7 +18,8 @@ setuptools.setup(
     python_requires='>=3.6',
     install_requires=[
             'bloom_filter2',
-            'termcolor'
+            'termcolor',
+            'bitarray'
         ],
     entry_points={
         'console_scripts': [
