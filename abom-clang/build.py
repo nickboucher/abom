@@ -21,7 +21,7 @@ bf_error_rate = 1e-7
 verbose = environ.get('ABOM_VERBOSE') == '1'
 
 
-def compile(cmd=None):
+def build(cmd=None):
     """ Defauly entrypoint for building an ABOM. """
     # Rewrite compile command if unittesting
     if cmd is not None:
@@ -32,13 +32,13 @@ def compile(cmd=None):
     if len(argv) <= 1:
         exit("Usage: abom <clang/ar> [args]")
     elif argv[1] in clang_cmds:
-        compile_clang(argv)
+        build_clang(argv)
     elif argv[1] in ar_cmds:
-        compile_ar(argv)
+        build_ar(argv)
     else:
         exit("clang and ar are the only supported tools.")
     
-def compile_clang(argv):
+def build_clang(argv):
     """ Package an ABOM with a clang compilation. """
     # Get Output File
     cmd = run([argv[1]] + ['-###'] + argv[2:], capture_output=True, text=True)
@@ -135,7 +135,7 @@ def compile_clang(argv):
                 if add.returncode != 0:
                     warnings.warn("Failed to add ABOM section to executable output.", category=AbomMissingWarning)
 
-def compile_ar(argv):
+def build_ar(argv):
     """ Build an ABOM for an archive operation. """
     ar = run(shlex_join(argv[1:]), shell=True)
     if ar.returncode != 0:

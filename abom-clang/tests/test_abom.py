@@ -8,7 +8,7 @@ from random import choices
 from string import ascii_lowercase, digits
 from warnings import catch_warnings, simplefilter
 from hashlib import file_digest
-from compile import compile
+from build import build
 from check import check
 from helpers import AbomMissingWarning
 
@@ -35,7 +35,7 @@ class TestAbom(TestCase):
             try:
                 with catch_warnings():
                     simplefilter('ignore', AbomMissingWarning)
-                    compile(compile_cmd)
+                    build(compile_cmd)
             except SystemExit as e:
                 self.fail(f'Build failed: {e}')
             
@@ -78,7 +78,7 @@ class TestAbom(TestCase):
             try:
                 with catch_warnings():
                     simplefilter('ignore', AbomMissingWarning)
-                    compile(compile_cmd)
+                    build(compile_cmd)
             except SystemExit as e:
                 self.fail(f'Compilation failed: {e}')
 
@@ -88,7 +88,7 @@ class TestAbom(TestCase):
             try:
                 with catch_warnings():
                     simplefilter('ignore', AbomMissingWarning)
-                    compile(link_cmd)
+                    build(link_cmd)
             except SystemExit as e:
                 self.fail(f'Linking failed: {e}')
             
