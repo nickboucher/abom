@@ -5,5 +5,5 @@ warnings.formatwarning = lambda message, *_: f"{colored('Warning', 'red')}: {mes
 
 
 class AbomMissingWarning(Warning):
-    """Linked object lacks ABOM."""
+    """ Linked or output object lacks ABOM. """
     pass

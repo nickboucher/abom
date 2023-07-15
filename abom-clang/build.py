@@ -4,25 +4,23 @@ from sys import argv as sysargv, exit
 from subprocess import run
 from shlex import split as shlex_split, join as shlex_join
 from os import environ
-from bloom_filter2 import BloomFilter
 from hashlib import file_digest
 from tempfile import NamedTemporaryFile
 from os.path import isfile
-from zlib import compress, decompress
+from shutil import copyfile
 from helpers import AbomMissingWarning
+from abom import ABOM, AbomError
 
 # Define constants
 clang_cmds = ['clang', 'clang++', 'cc', 'c++']
 ar_cmds = ['ar', 'llvm-ar']
-bf_max_elements = 100000
-bf_error_rate = 1e-7
 
 # Set verbosity
 verbose = environ.get('ABOM_VERBOSE') == '1'
 
 
-def build(cmd=None):
-    """ Defauly entrypoint for building an ABOM. """
+def build(cmd: str|None = None) -> None:
+    ''' Default entrypoint for building an ABOM. '''
     # Rewrite compile command if unittesting
     if cmd is not None:
         argv = shlex_split(cmd)
@@ -38,8 +36,8 @@ def build(cmd=None):
     else:
         exit("clang and ar are the only supported tools.")
     
-def build_clang(argv):
-    """ Package an ABOM with a clang compilation. """
+def build_clang(argv: list[str]) -> None:
+    ''' Package an ABOM with a clang compilation. '''
     # Get Output File
     cmd = run([argv[1]] + ['-###'] + argv[2:], capture_output=True, text=True)
     cmds = cmd.stderr.rstrip('\n').split('\n')
@@ -95,48 +93,47 @@ def build_clang(argv):
             print("\nObject: " + output)
             print("Dependencies:\n" + '\n'.join(map(lambda x: f'\t{x}',file_deps)))
     # Create Bloom Filter
-    with NamedTemporaryFile() as bf_file:
-        asm = False
-        with BloomFilter(max_elements=bf_max_elements, error_rate=bf_error_rate, filename=(bf_file.name,-1)) as bf:
-            for dep in dependencies:
-                if dep.endswith('.s'):
-                    asm = True
-                with open(dep, 'rb') as f:
-                    hash = file_digest(f, "sha3_256")
-                bf.add(hash.hexdigest())
-            if ld:
-                abom_union(bf, last[1:], out)
-        with NamedTemporaryFile() as bf_gz:
-            write_abom(bf_file.name, bf_gz)
-            # Run Compilation
-            for cmd in cmds[4:]:
-                if verbose:
-                    print(f"\nRunning Command:\n{cmd}\n")
-                comp = run(cmd, shell=True, capture_output=True, text=True)
-                print(comp.stderr, end='')
-            # Remove stale ABOMs
-            rm = run(f'llvm-objcopy --remove-section=__ABOM,__abom --remove-section=,__abom {out}', shell=True, capture_output=True)
-            if rm.returncode != 0:
-               warnings.warn("Failed to remove ABOM sections from dependencies.", category=AbomMissingWarning)
-            # Add ABOM to output
-            is_obj = run(f'file -b {out}', shell=True, capture_output=True, text=True)
-            if is_obj.returncode != 0:
-                exit(f"Failed to determine if {out} is executable.")
-            if asm:
-                cp = run(f'cp {bf_gz.name} {out}.abom', shell=True, capture_output=True)
-                if cp.returncode != 0:
-                    warnings.warn("Failed to create seperate ABOM file for assembly inputs.", category=AbomMissingWarning)
-            elif 'object' in is_obj.stdout:
-                add = run(f'ld -r -sectcreate __ABOM __abom {bf_gz.name} {out} -o {out}', shell=True, capture_output=True)
-                if add.returncode != 0:
-                    warnings.warn("Failed to add ABOM section to object output.", category=AbomMissingWarning)
-            else:
-                add = run(f'llvm-objcopy --add-section=__ABOM,__abom={bf_gz.name} {out}', shell=True, capture_output=True)
-                if add.returncode != 0:
-                    warnings.warn("Failed to add ABOM section to executable output.", category=AbomMissingWarning)
+    abom = ABOM()
+    asm = False
+    for dep in dependencies:
+        if dep.endswith('.s'):
+            asm = True
+        with open(dep, 'rb') as f:
+            abom += file_digest(f, "sha3_256").hexdigest()
+    if ld:
+        abom_union(abom, last[1:], out)
+    with NamedTemporaryFile() as af:
+        abom.dump(af)
+        # Run Compilation
+        for cmd in cmds[4:]:
+            if verbose:
+                print(f"\nRunning Command:\n{cmd}\n")
+            comp = run(cmd, shell=True, capture_output=True, text=True)
+            print(comp.stderr, end='')
+        # Remove stale ABOMs
+        rm = run(f'llvm-objcopy --remove-section=__ABOM,__abom --remove-section=,__abom {out}', shell=True, capture_output=True)
+        if rm.returncode != 0:
+            warnings.warn("Failed to remove ABOM sections from dependencies.", category=AbomMissingWarning)
+        # Add ABOM to output
+        is_obj = run(f'file -b {out}', shell=True, capture_output=True, text=True)
+        if is_obj.returncode != 0:
+            exit(f"Failed to determine if {out} is executable.")
+        if asm:
+            try:
+                copyfile(af.name, f'{out}.abom')
+            except:
+                warnings.warn("Failed to create seperate ABOM file for assembly inputs.", category=AbomMissingWarning)
+        elif 'object' in is_obj.stdout:
+            add = run(f'ld -r -sectcreate __ABOM __abom {af.name} {out} -o {out}', shell=True, capture_output=True)
+            if add.returncode != 0:
+                warnings.warn("Failed to add ABOM section to object output.", category=AbomMissingWarning)
+        else:
+            add = run(f'llvm-objcopy --add-section=__ABOM,__abom={af.name} {out}', shell=True, capture_output=True)
+            if add.returncode != 0:
+                warnings.warn("Failed to add ABOM section to executable output.", category=AbomMissingWarning)
 
-def build_ar(argv):
-    """ Build an ABOM for an archive operation. """
+def build_ar(argv: list[str]) -> None:
+    ''' Build an ABOM for an archive operation. '''
     ar = run(shlex_join(argv[1:]), shell=True)
     if ar.returncode != 0:
         exit("Skipping ABOM generation due to archive error.")
@@ -149,49 +146,34 @@ def build_ar(argv):
         n += 1
     if out == '':
         exit("Output file could not be determined.")
-    with NamedTemporaryFile() as bf_file:
-        with BloomFilter(max_elements=bf_max_elements, error_rate=bf_error_rate, filename=(bf_file.name,-1)) as bf:
-            abom_union(bf, argv[n+1:], out, operation='Archived')
-        with open(f'{out}.abom', 'wb') as bf_gz:
-            write_abom(bf_file.name, bf_gz)
+    abom = abom_union(ABOM(), argv[n+1:], out, operation='Archived')
+    with open(f'{out}.abom', 'wb') as af:
+        abom.dump(af)
 
-def abom_union(bf, files, out, operation='Linked'):
-    """ Union the bloom filter `bf` with the potential ABOMs in `files` where `out` is the output file and `operation` is the task being performed. """
-    with NamedTemporaryFile() as gz:
-        for option in files:
-            if option != out and isfile(option):
-                abom_available = False
-                if isfile(f'{option}.abom'):
-                    cp = run(f'cp {option}.abom {gz.name}', shell=True, capture_output=True)
-                    if cp.returncode == 0:
-                        abom_available = True
+def abom_union(abom: ABOM, files: list[str], out: str, operation: str ='Linked') -> ABOM:
+    ''' Union `abom` with the potential ABOMs in `files` where `out` is the output file and `operation` is the task being performed. '''
+    for option in files:
+        if option != out and isfile(option):
+            abom_loaded = False
+            if isfile(f'{option}.abom'):
+                with open(f'{option}.abom', 'rb') as af:
+                    try:
+                        abom |= ABOM.load(af)
+                        abom_loaded = True
                         if verbose:
-                            print(f"Using dedicated ABOM file instead of embedded binary: {option}.abom")
-                    else:
+                            print(f"Merging dedicated ABOM file instead of embedded binary: {option}.abom")
+                    except AbomError:
                         warnings.warn(f"Failed to load dedicated ABOM file: {option}.abom", category=AbomMissingWarning)
-                if not abom_available:
-                    objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={gz.name} {option}', shell=True, capture_output=True)
+            if not abom_loaded:
+                with NamedTemporaryFile() as af:
+                    objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={af.name} {option}', shell=True, capture_output=True)
                     if objcopy.returncode == 0:
-                        abom_available = True
                         if verbose:
                             print(f"Merging Linked Object ABOM: {option}")
-                if abom_available:
-                    with NamedTemporaryFile() as ln:
-                        with open(gz.name, 'rb') as comp:
-                            if comp.read(6) != b"ABOM\x01\x01":
-                                exit("Invalid ABOM Header.")
-                            ln.write(decompress(comp.read()))
-                            ln.flush()
-                            with BloomFilter(max_elements=bf_max_elements, error_rate=bf_error_rate, filename=(ln.name,-1)) as bf2:
-                                bf.union(bf2)
-                else:
-                    warnings.warn(f"{operation} object lacks ABOM: {option}", category=AbomMissingWarning)
-
-def write_abom(bf_filename, f):
-    """ Write the bloom filter saved at `bf_filename` to the file handler `f`. """
-    # Write ABOM Header ('ABOM',version,num_filters)
-    f.write(b"ABOM\x01\x01")
-    with open(bf_filename, 'rb') as bf_f:
-        # Compress Bloom Filter
-        f.write(compress(bf_f.read()))
-    f.flush()
+                        try:
+                            abom |= ABOM.load(af.name)
+                        except AbomError:
+                            warnings.warn(f"Failed to load embedded ABOM: {option}", category=AbomMissingWarning)
+                    else:
+                        warnings.warn(f"{operation} object lacks ABOM: {option}", category=AbomMissingWarning)           
+    return abom

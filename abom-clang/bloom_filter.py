@@ -11,6 +11,9 @@ from arithmetic_compressor.models import StaticModel
 class CompressedBloomFilter():
     ''' A Compressed Bloom Filter according to M. Mitzenmacher, IEEE/ACM 2002. '''
 
+    # Contant for max unsigned 32-bit integer (2^32-1)
+    MAX_INT = 4294967295
+
     def __init__(self, m: int, k: int, A: bitarray|None = None, endian='little', prehashed: bool = False):
         ''' Creates a new compressed Bloom filter with `m` bits and `k` hash functions. '''
         if m == 0 or (m & (m-1) != 0):
@@ -69,7 +72,11 @@ class CompressedBloomFilter():
     
     def contains(self, x: bytes|str) -> bool:
         ''' Returns True if `x` is in the Bloom filter using syntax `bf.contains(x)`. '''
-        for i in self.__hash(x):
+        try:
+            h = self.__hash(x)
+        except ValueError:
+            return False
+        for i in h:
             if not self.A[i]:
                 return False
         return True
@@ -88,15 +95,16 @@ class CompressedBloomFilter():
         ''' Serialize Bloom filter to buffer `f`, optionally compressed. '''
         if compressed:
             # Compressed Binary Format:
-            # - Arithmetic Model p(1) (double)
+            # - Number of elements in Bloom filter: `m` (unsigned int)
+            # - Number of hash functions in Bloom filter `k` (unsigned char)
+            # - Arithmetic Model p(1) of concatenated Bloom filters as '[0,1] x (2^32-1)' (unsigned int)
             # - Arithmetically-compressed Bloom filter
             p_1 = self.A.count() / self.m
             model = StaticModel({ 1: p_1, 0: 1-p_1 })
             coder = AECompressor(model)
             cbf = bitarray(coder.compress(self.A), endian=self.A.endian).tobytes()
             endian = '<' if self.A.endian == 'little' else '>'
-            warn('Should this be a double or float?')
-            f.write(pack(f'{endian}d', p_1))
+            f.write(pack(f'{endian}IHI', self.m, self.k, int(p_1*self.MAX_INT)))
             f.write(cbf)
         else:
             self.A.tofile(f)
@@ -104,7 +112,7 @@ class CompressedBloomFilter():
 
     def clone(self) -> 'CompressedBloomFilter':
         ''' Returns a copy of the Bloom filter. '''
-        return CompressedBloomFilter(self.m, self.k, self.A.copy(), self.A.endian, self.prehashed)
+        return CompressedBloomFilter(self.m, self.k, self.A.copy(), self.A.endian(), self.prehashed)
     
     def __iadd__(self, x: bytes|str) -> 'CompressedBloomFilter':
         ''' Inserts `x` into the Bloom filter using syntax `bf += x`. '''
@@ -126,7 +134,7 @@ class CompressedBloomFilter():
         ''' Returns a copy of the Bloom filter with `x` inserted using syntax `bf + x`. In-place insertion is preferred. '''
         return self.clone().insert(x)
     
-    def __inv__(self) -> 'CompressedBloomFilter':
+    def __invert__(self) -> 'CompressedBloomFilter':
         ''' Returns the false positive rate of the Bloom filter at its current saturation using the syntax `~bf`. '''
         return self.false_positive_rate()
     
