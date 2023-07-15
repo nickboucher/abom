@@ -21,6 +21,11 @@ To check whether a certain dependency is present in the ABOM-compiled program, r
 abom-check <binary> <dependency>
 ```
 
+To enable verbose logging, set the environment variable `ABOM_VERBOSE` to `1`, e.g.:
+```bash
+export ABOM_VERBOSE=1
+```
+
 ## Tests
 
 To run unit tests, run the following command from the root directory:
