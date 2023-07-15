@@ -8,7 +8,7 @@ from hashlib import file_digest
 from tempfile import NamedTemporaryFile
 from os.path import isfile
 from shutil import copyfile
-from helpers import AbomMissingWarning
+from helpers import AbomMissingWarning, set_verbose, log
 from abom import ABOM, AbomError
 
 # Define constants
@@ -16,7 +16,7 @@ clang_cmds = ['clang', 'clang++', 'cc', 'c++']
 ar_cmds = ['ar', 'llvm-ar']
 
 # Set verbosity
-verbose = environ.get('ABOM_VERBOSE') == '1'
+set_verbose(environ.get('ABOM_VERBOSE') == '1')
 
 
 def build(cmd: str|None = None) -> None:
@@ -54,8 +54,7 @@ def build_clang(argv: list[str]) -> None:
         print(cmd.stderr)
         exit("Output file could not be determined.")
     out = last[idx+1]
-    if verbose:
-        print("Output: " + out)
+    log("Output: " + out)
     # Gather Dependencies
     o = []
     args = argv[1:]
@@ -89,9 +88,8 @@ def build_clang(argv: list[str]) -> None:
         for dep in inp[1:]:
             file_deps += shlex_split(dep)
         dependencies.update(file_deps)
-        if verbose:
-            print("\nObject: " + output)
-            print("Dependencies:\n" + '\n'.join(map(lambda x: f'\t{x}',file_deps)))
+        log("\nObject: " + output)
+        log("Dependencies:\n" + '\n'.join(map(lambda x: f'\t{x}',file_deps)))
     # Create Bloom Filter
     abom = ABOM()
     asm = False
@@ -106,8 +104,7 @@ def build_clang(argv: list[str]) -> None:
         abom.dump(af)
         # Run Compilation
         for cmd in cmds[4:]:
-            if verbose:
-                print(f"\nRunning Command:\n{cmd}\n")
+            log(f"\nRunning Command:\n{cmd}\n")
             comp = run(cmd, shell=True, capture_output=True, text=True)
             print(comp.stderr, end='')
         # Remove stale ABOMs
@@ -160,16 +157,14 @@ def abom_union(abom: ABOM, files: list[str], out: str, operation: str ='Linked')
                     try:
                         abom |= ABOM.load(af)
                         abom_loaded = True
-                        if verbose:
-                            print(f"Merging dedicated ABOM file instead of embedded binary: {option}.abom")
+                        log(f"Merging dedicated ABOM file instead of embedded binary: {option}.abom")
                     except AbomError:
                         warnings.warn(f"Failed to load dedicated ABOM file: {option}.abom", category=AbomMissingWarning)
             if not abom_loaded:
                 with NamedTemporaryFile() as af:
                     objcopy = run(f'llvm-objcopy --dump-section=__ABOM,__abom={af.name} {option}', shell=True, capture_output=True)
                     if objcopy.returncode == 0:
-                        if verbose:
-                            print(f"Merging Linked Object ABOM: {option}")
+                        log(f"Merging Linked Object ABOM: {option}")
                         try:
                             abom |= ABOM.load(af.name)
                         except AbomError:
