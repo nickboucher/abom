@@ -4,8 +4,8 @@ from os import environ
 from os.path import isfile
 from subprocess import run
 from tempfile import NamedTemporaryFile
-from abom import ABOM, AbomError
-from helpers import set_verbose, log
+from abom.abom import ABOM, AbomError
+from abom.helpers import set_verbose, log
 
 # Set verbosity
 set_verbose(environ.get('ABOM_VERBOSE') == '1')

@@ -5,7 +5,7 @@ from functools import reduce
 from math import ceil
 from arithmetic_compressor import AECompressor
 from arithmetic_compressor.models import StaticModel
-from bloom_filter import CompressedBloomFilter
+from abom.bloom_filter import CompressedBloomFilter
 
 
 class AbomError(Exception):
