@@ -8,9 +8,9 @@ from random import choices
 from string import ascii_lowercase, digits
 from warnings import catch_warnings, simplefilter
 from hashlib import file_digest
-from build import build
-from check import check
-from helpers import AbomMissingWarning
+from abom.build import build
+from abom.check import check
+from abom.helpers import AbomMissingWarning
 
 class TestAbom(TestCase):
     
