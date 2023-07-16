@@ -18,7 +18,8 @@ setuptools.setup(
     python_requires='>=3.6',
     install_requires=[
             'termcolor',
-            'bitarray'
+            'bitarray',
+            'yaecl@git+https://github.com/nickboucher/YAECL-Yet-Another-Entropy-Coding-Library.git'
         ],
     entry_points={
         'console_scripts': [

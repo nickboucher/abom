@@ -3,18 +3,24 @@ from bitarray.util import ba2int
 from hashlib import sha3_256
 from warnings import warn
 from io import BufferedIOBase, BytesIO
-from struct import pack
-from arithmetic_compressor import AECompressor
-from arithmetic_compressor.models import StaticModel
+from struct import pack, unpack
+from yaecl import ac_encoder_t, ac_decoder_t, bit_stream_t
+from array import array
 
 
 class CompressedBloomFilter():
     ''' A Compressed Bloom Filter according to M. Mitzenmacher, IEEE/ACM 2002. '''
 
+    # The number of bits used to encode the CDF
+    cdf_bits = 16
+    
+
     # Contant for max unsigned 32-bit integer (2^32-1)
     MAX_INT = 4294967295
+    # Constant for the max value of the CDF
+    CDF_MAX = 1<<cdf_bits
 
-    def __init__(self, m: int, k: int, A: bitarray|None = None, endian='little', prehashed: bool = False):
+    def __init__(self, m: int, k: int, A: bitarray|None = None, endian: str ='little', prehashed: bool = False):
         ''' Creates a new compressed Bloom filter with `m` bits and `k` hash functions. '''
         if m == 0 or (m & (m-1) != 0):
             raise ValueError('`m` must be a non-zero power of 2.')
@@ -91,24 +97,60 @@ class CompressedBloomFilter():
             self.dump(f, compressed=compressed)
             return f.getvalue()
         
+    @classmethod
+    def deserialize(cls, data: bytes, compressed: bool = True, endian: str ='little', prehashed: bool = False) -> 'CompressedBloomFilter':
+        ''' Deserializes Bloom filter from bytes `data`, optionally compressed. '''
+        with BytesIO(data) as f:
+            return cls.load(f, compressed=compressed, endian=endian, prehashed=prehashed)
+        
     def dump(self, f: BufferedIOBase, compressed: bool = True) -> None:
         ''' Serialize Bloom filter to buffer `f`, optionally compressed. '''
+        end = '<' if self.A.endian() == 'little' else '>'
         if compressed:
             # Compressed Binary Format:
-            # - Number of elements in Bloom filter: `m` (unsigned int)
-            # - Number of hash functions in Bloom filter `k` (unsigned char)
-            # - Arithmetic Model p(1) of concatenated Bloom filters as '[0,1] x (2^32-1)' (unsigned int)
-            # - Arithmetically-compressed Bloom filter
+            # - Number of elements in Bloom filter: `m` (uint32_t)
+            # - Number of hash functions in Bloom filter `k` (uint8_t)
+            # - Arithmetic Model p(1) of concatenated Bloom filters as '[0,1] x (2^32-1)' (uint32_t)
+            # - Byte length of Compressed Bloom Filters Blob: `l` (uint32_t)
+            # - Arithmetically-Compressed Bloom Filters Blob
             p_1 = self.A.count() / self.m
-            model = StaticModel({ 1: p_1, 0: 1-p_1 })
-            coder = AECompressor(model)
-            cbf = bitarray(coder.compress(self.A), endian=self.A.endian).tobytes()
-            endian = '<' if self.A.endian == 'little' else '>'
-            f.write(pack(f'{endian}IHI', self.m, self.k, int(p_1*self.MAX_INT)))
-            f.write(cbf)
+            ac_enc = ac_encoder_t()
+            cdf = array('i', [0,int((1-p_1)*self.CDF_MAX),self.CDF_MAX])
+            A = array('i', self.A.tolist())
+            ac_enc.encode_nx1(memoryview(A), memoryview(cdf), self.cdf_bits)
+            ac_enc.flush()
+            f.write(pack(f'{end}IBII', self.m, self.k, int(p_1*self.MAX_INT), ac_enc.bit_stream.size()))
+            f.write(ac_enc.bit_stream.data)
         else:
+            # Uncompressed Binary Format:
+            # - Number of elements in Bloom filter: `m` (uint32_t)
+            # - Number of hash functions in Bloom filter `k` (uint8_t)
+            # - Byte length of Uncompressed Bloom Filters Blob: `l` (uint32_t)
+            # - Uncompressed Bloom Filters Blob
+            f.write(pack(f'{end}IBI', self.m, self.k, self.A.nbytes))
             self.A.tofile(f)
         f.flush()
+
+    @classmethod
+    def load(cls, f: BufferedIOBase, compressed: bool = True, endian: str ='little', prehashed: bool = False) -> 'CompressedBloomFilter':
+        ''' Deserialize Bloom filter from buffer `f`, optionally compressed. '''
+        end = '<' if endian == 'little' else '>'
+        if compressed:
+            m, k, p_1, l = unpack(f'{end}IBII', f.read(13))
+            p_1 /= cls.MAX_INT
+            bs = bit_stream_t()
+            bs.data = f.read(l)
+            ac_dec = ac_decoder_t(bs)
+            cdf = array('i', [0,int((1-p_1)*cls.CDF_MAX),cls.CDF_MAX])
+            A = array('i', [0]*m)
+            ac_dec.decode_nx1(len(cdf)-1, memoryview(cdf), cls.cdf_bits, memoryview(A))
+            A=bitarray(A, endian=endian)
+            return CompressedBloomFilter(m, k, A=A, endian=endian, prehashed=prehashed)
+        else:
+            m, k, l = unpack(f'{end}IBI', f.read(9))
+            A = bitarray(endian=endian)
+            A.fromfile(f, l)
+            return CompressedBloomFilter(m, k, A=A[:m], endian=endian, prehashed=prehashed)
 
     def clone(self) -> 'CompressedBloomFilter':
         ''' Returns a copy of the Bloom filter. '''

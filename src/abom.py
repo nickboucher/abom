@@ -68,10 +68,10 @@ class ABOM():
         # Binary Format (little endian):
         # - Header:
         #   - Magic Word: `ABOM`
-        #   - Protocol Version: `1` (unsigned char)
-        #   - Number of Bloom filters: `n` (unsigned short)
-        #   - Arithmetic Model p(1) of concatenated Bloom filters as '[0,1] x (2^32-1)' (unsigned int)
-        #   - Byte length of Compressed Bloom Filters b=Blob: `l` (unsigned long)
+        #   - Protocol Version: `1` (uint8_t)
+        #   - Number of Bloom filters: `n` (uint16_t)
+        #   - Arithmetic Model p(1) of concatenated Bloom filters as '[0,1] x (2^32-1)' (uint32_t)
+        #   - Byte length of Compressed Bloom Filters Blob: `l` (uint32_t)
         # - Compressed Bloom Filters Blob:
         #   - Arithmetically-compressed concatenated Bloom filters (bf_0 bf_1 ... bf_n)
         if isinstance(f, str):
@@ -85,7 +85,7 @@ class ABOM():
         ac_enc.encode_nx1(memoryview(bf_blob), memoryview(cdf), self.cdf_bits)
         ac_enc.flush()
 
-        header = pack('<ccccBHIL', b'A', b'B', b'O', b'M', 1, len(self.bfs), int(p_1 * self.MAX_INT), ac_enc.bit_stream.size())
+        header = pack('<ccccBHII', b'A', b'B', b'O', b'M', 1, len(self.bfs), int(p_1 * self.MAX_INT), ac_enc.bit_stream.size())
         f.write(header)
         f.write(ac_enc.bit_stream.data)
         f.flush()
@@ -102,7 +102,7 @@ class ABOM():
         protocol_version = f.read(1)
         if protocol_version != b'\x01':
             raise AbomError('Invalid protocol version.')
-        n, p_1, l = unpack('<HIL', f.read(10))
+        n, p_1, l = unpack('<HII', f.read(10))
         p_1 /= cls.MAX_INT
 
         bf_blob = array('i', [0]*(cls.m*n))
