@@ -2,10 +2,9 @@ from bitarray import bitarray
 from io import BufferedIOBase, BytesIO
 from struct import pack, unpack
 from functools import reduce
-from math import ceil
-from arithmetic_compressor import AECompressor
-from arithmetic_compressor.models import StaticModel
-from abom.bloom_filter import CompressedBloomFilter
+from yaecl import ac_encoder_t, ac_decoder_t, bit_stream_t
+from array import array
+from bloom_filter import CompressedBloomFilter
 
 
 class AbomError(Exception):
@@ -22,9 +21,14 @@ class ABOM():
     k = 16
     # The highest tolerated false positive rate
     f = 0.0001
+    # The number of bits used to encode the CDF
+    cdf_bits = 16
+    
 
     # Contant for max unsigned 32-bit integer (2^32-1)
     MAX_INT = 4294967295
+    # Constant for the max value of the CDF
+    CDF_MAX = 1<<cdf_bits
 
     def __init__(self):
         self.bfs = [CompressedBloomFilter(self.m, self.k, prehashed=True)]
@@ -67,20 +71,23 @@ class ABOM():
         #   - Protocol Version: `1` (unsigned char)
         #   - Number of Bloom filters: `n` (unsigned short)
         #   - Arithmetic Model p(1) of concatenated Bloom filters as '[0,1] x (2^32-1)' (unsigned int)
-        #   - Bit length of Compressed Bloom Filters b=Blob: `l` (unsigned long)
+        #   - Byte length of Compressed Bloom Filters b=Blob: `l` (unsigned long)
         # - Compressed Bloom Filters Blob:
         #   - Arithmetically-compressed concatenated Bloom filters (bf_0 bf_1 ... bf_n)
         if isinstance(f, str):
             with open(f, 'wb') as f:
                 return self.dump(f)
-        bf_blob = reduce(lambda x, y: x + y.A.tolist(), self.bfs, [])
+        bf_blob = reduce(lambda x, y: x + array('i', y.A.tolist()), self.bfs, array('i', []))
         p_1 = reduce(lambda x, y: x + y.A.count(), self.bfs, 0) / (len(self.bfs) * self.m)
-        model = StaticModel({ 1: p_1, 0: 1-p_1 })
-        coder = AECompressor(model)
-        cbfs = bitarray(coder.compress(bf_blob), endian='little')
-        header = pack('<ccccBHIL', b'A', b'B', b'O', b'M', 1, len(self.bfs), int(p_1 * self.MAX_INT), len(cbfs))
+
+        ac_enc = ac_encoder_t()
+        cdf = array('i', [0,int((1-p_1)*self.CDF_MAX),self.CDF_MAX])
+        ac_enc.encode_nx1(memoryview(bf_blob), memoryview(cdf), self.cdf_bits)
+        ac_enc.flush()
+
+        header = pack('<ccccBHIL', b'A', b'B', b'O', b'M', 1, len(self.bfs), int(p_1 * self.MAX_INT), ac_enc.bit_stream.size())
         f.write(header)
-        f.write(cbfs.tobytes())
+        f.write(ac_enc.bit_stream.data)
         f.flush()
 
     @classmethod
@@ -97,17 +104,14 @@ class ABOM():
             raise AbomError('Invalid protocol version.')
         n, p_1, l = unpack('<HIL', f.read(10))
         p_1 /= cls.MAX_INT
-        cbfs = bitarray(endian='little')
-        cbfs.frombytes(f.read(ceil(l/8)))
-        if p_1 == 0:
-            model = StaticModel({ 0: 1 })
-        else:
-            model = StaticModel({ 1: p_1, 0: 1-p_1 })
-        coder = AECompressor(model)
-        try:
-            bf_blob = coder.decompress(cbfs[:l].tolist(), n*cls.m)
-        except ValueError:
-            print(cbfs)
+
+        bf_blob = array('i', [0]*(cls.m*n))
+        cdf = array('i', [0,int((1-p_1)*cls.CDF_MAX),cls.CDF_MAX])
+        bs = bit_stream_t()
+        bs.data = f.read(l)
+        ac_dec = ac_decoder_t(bs)
+        ac_dec.decode_nx1(len(cdf)-1, memoryview(cdf), cls.cdf_bits, memoryview(bf_blob))
+
         abom = ABOM()
         for i in range(0,len(bf_blob), cls.m):
             A = bitarray(bf_blob[i:i+cls.m], endian='little')

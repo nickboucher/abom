@@ -8,8 +8,8 @@ from hashlib import file_digest
 from tempfile import NamedTemporaryFile
 from os.path import isfile
 from shutil import copyfile
-from abom.helpers import AbomMissingWarning, set_verbose, log
-from abom.abom import ABOM, AbomError
+from helpers import AbomMissingWarning, set_verbose, log
+from abom import ABOM, AbomError
 
 # Define constants
 clang_cmds = ['clang', 'clang++', 'cc', 'c++']
