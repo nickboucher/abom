@@ -1,7 +1,6 @@
 from bitarray import bitarray
 from bitarray.util import ba2int
 from hashlib import sha3_256
-from warnings import warn
 from io import BufferedIOBase, BytesIO
 from struct import pack, unpack
 from yaecl import ac_encoder_t, ac_decoder_t, bit_stream_t
