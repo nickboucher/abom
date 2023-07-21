@@ -19,12 +19,16 @@ setuptools.setup(
     install_requires=[
             'termcolor',
             'bitarray',
-            'yaecl@git+https://github.com/nickboucher/YAECL-Yet-Another-Entropy-Coding-Library.git'
+            'yaecl@git+https://github.com/nickboucher/YAECL-Yet-Another-Entropy-Coding-Library.git',
+            'tqdm',
+            'matplotlib',
+            'numpy'
         ],
     entry_points={
         'console_scripts': [
             'abom=build:build',
-            'abom-check=check:check'
+            'abom-check=check:check',
+            'abom-tuning=utils.tuning:main'
         ],
     },
 )

@@ -11,14 +11,12 @@ from array import array
 class CompressedBloomFilter():
     ''' A Compressed Bloom Filter according to M. Mitzenmacher, IEEE/ACM 2002. '''
 
-    # The number of bits used to encode the CDF
-    cdf_bits = 16
-    
-
     # Contant for max unsigned 32-bit integer (2^32-1)
     MAX_INT = 4294967295
+    # Constant for number of bits used to encode the CDF
+    CDF_BITS = 16
     # Constant for the max value of the CDF
-    CDF_MAX = 1<<cdf_bits
+    CDF_MAX = 2**16
 
     def __init__(self, m: int, k: int, A: bitarray|None = None, endian: str ='little', prehashed: bool = False):
         ''' Creates a new compressed Bloom filter with `m` bits and `k` hash functions. '''
@@ -51,8 +49,19 @@ class CompressedBloomFilter():
         b = bitarray()
         if self.prehashed:
             b.frombytes(x)
-            if len(b) > self.k * self.idx_bits:
-                warn('Parameters do not utilize all bits in hash.')
+            # Compress hash if needed to utilize all bits in hash
+            tot_idx_bits = self.k * self.idx_bits
+            if len(b) > tot_idx_bits:
+                bp = bitarray()
+                step = len(b) // tot_idx_bits
+                last_step = len(b) % tot_idx_bits
+                for i in range(0, len(b) - last_step, step):
+                    bit = 0
+                    for j in range(i,i+step):
+                        bit ^= b[j]
+                    bp.append(bit)
+                for i in range(last_step):
+                    bp[-1] ^= b[len(b)-i-1]
         # Expand hash if needed
         while len(b) < self.k * self.idx_bits:
             x = sha3_256(x).digest()
@@ -117,7 +126,7 @@ class CompressedBloomFilter():
             ac_enc = ac_encoder_t()
             cdf = array('i', [0,int((1-p_1)*self.CDF_MAX),self.CDF_MAX])
             A = array('i', self.A.tolist())
-            ac_enc.encode_nx1(memoryview(A), memoryview(cdf), self.cdf_bits)
+            ac_enc.encode_nx1(memoryview(A), memoryview(cdf), self.CDF_BITS)
             ac_enc.flush()
             f.write(pack(f'{end}IBII', self.m, self.k, int(p_1*self.MAX_INT), ac_enc.bit_stream.size()))
             f.write(ac_enc.bit_stream.data)
@@ -143,7 +152,7 @@ class CompressedBloomFilter():
             ac_dec = ac_decoder_t(bs)
             cdf = array('i', [0,int((1-p_1)*cls.CDF_MAX),cls.CDF_MAX])
             A = array('i', [0]*m)
-            ac_dec.decode_nx1(len(cdf)-1, memoryview(cdf), cls.cdf_bits, memoryview(A))
+            ac_dec.decode_nx1(len(cdf)-1, memoryview(cdf), cls.CDF_BITS, memoryview(A))
             A=bitarray(A, endian=endian)
             return CompressedBloomFilter(m, k, A=A, endian=endian, prehashed=prehashed)
         else:

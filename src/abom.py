@@ -16,22 +16,21 @@ class ABOM():
     ''' An Automated Bill of Materials. '''
 
     # Number of elements in Bloom filter
-    m = 2**16
+    m = 2**18
     # Number of hash functions in Bloom filter
-    k = 16
+    k = 2
     # The highest tolerated false positive rate
-    f = 0.0001
-    # The number of bits used to encode the CDF
-    cdf_bits = 16
-    
+    f = 1/(1<<14)
 
     # Contant for max unsigned 32-bit integer (2^32-1)
     MAX_INT = 4294967295
+    # Constant for number of bits used to encode the CDF
+    CDF_BITS = 16
     # Constant for the max value of the CDF
-    CDF_MAX = 1<<cdf_bits
+    CDF_MAX = 2**16
 
     def __init__(self):
-        self.bfs = [CompressedBloomFilter(self.m, self.k, prehashed=True)]
+        self.bfs = []
 
     def insert(self, x: bytes|str) -> 'ABOM':
         ''' Inserts `x` into the ABOM using syntax `abom.insert(x)`. '''
@@ -48,12 +47,15 @@ class ABOM():
         if self.m != abom.m or self.k != abom.k:
             raise AbomError('ABOMs must have same `m` and `k`.')
         for bf in abom.bfs:
+            inserted = False
             for i in range(len(self.bfs)):
                 u = self.bfs[i] | bf
                 if ~u < self.f:
                     self.bfs[i] = u
+                    inserted = True
                     break
-            self.bfs.append(bf)
+            if not inserted:
+                self.bfs.append(bf)
         return self
     
     def contains(self, x: bytes|str) -> bool:
@@ -77,12 +79,15 @@ class ABOM():
         if isinstance(f, str):
             with open(f, 'wb') as f:
                 return self.dump(f)
+    
+        if len(self.bfs) == 0:
+            self.bfs.append(CompressedBloomFilter(self.m, self.k, prehashed=True))
         bf_blob = reduce(lambda x, y: x + array('i', y.A.tolist()), self.bfs, array('i', []))
         p_1 = reduce(lambda x, y: x + y.A.count(), self.bfs, 0) / (len(self.bfs) * self.m)
 
         ac_enc = ac_encoder_t()
         cdf = array('i', [0,int((1-p_1)*self.CDF_MAX),self.CDF_MAX])
-        ac_enc.encode_nx1(memoryview(bf_blob), memoryview(cdf), self.cdf_bits)
+        ac_enc.encode_nx1(memoryview(bf_blob), memoryview(cdf), self.CDF_BITS)
         ac_enc.flush()
 
         header = pack('<ccccBHII', b'A', b'B', b'O', b'M', 1, len(self.bfs), int(p_1 * self.MAX_INT), ac_enc.bit_stream.size())
@@ -110,7 +115,7 @@ class ABOM():
         bs = bit_stream_t()
         bs.data = f.read(l)
         ac_dec = ac_decoder_t(bs)
-        ac_dec.decode_nx1(len(cdf)-1, memoryview(cdf), cls.cdf_bits, memoryview(bf_blob))
+        ac_dec.decode_nx1(len(cdf)-1, memoryview(cdf), cls.CDF_BITS, memoryview(bf_blob))
 
         abom = ABOM()
         for i in range(0,len(bf_blob), cls.m):
