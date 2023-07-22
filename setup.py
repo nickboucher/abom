@@ -15,7 +15,7 @@ setuptools.setup(
     url='https://github.com/nickboucher/abom',
     package_dir={'': 'src'},
     packages=setuptools.find_packages(where='src'),
-    python_requires='>=3.6',
+    python_requires='>=3.11',
     install_requires=[
             'termcolor',
             'bitarray',
