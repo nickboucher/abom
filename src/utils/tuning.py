@@ -194,11 +194,11 @@ def graph_4D(stats: list[BFStats], out_dir: str, max_f: float) -> None:
                 F[x.k] = x
         
         n_max = max(map(lambda x: x.n, X))
-        s_bytes_max = max(map(lambda x: x.s_bytes, X))
+        z_bytes_max = max(map(lambda x: x.z_bytes, X))
 
         def polygon_under_graph(k):
             N = sorted(k, key=lambda x: x.n)
-            return [(N[0].n, 0.)] + [(n.n, n.s_bytes) for n in N] + [(n_max, N[-1].s_bytes), (n_max, 0.)]
+            return [(N[0].n, 0.)] + [(n.n, n.z_bytes) for n in N] + [(n_max, N[-1].z_bytes), (n_max, 0.)]
         
         ax = plt.figure().add_subplot(projection='3d',computed_zorder=False)
         verts = [polygon_under_graph(k) for k in K.values()]
@@ -209,9 +209,9 @@ def graph_4D(stats: list[BFStats], out_dir: str, max_f: float) -> None:
         ax.add_collection3d(poly, zs=zs, zdir='y')
 
         for f in F.values():
-            ax.scatter(f.n, f.k, f.s_bytes, c='darkorange', edgecolors='black', linewidths=.25, s=6, zorder=1, label='False Positive\nRate = ' + f'{max_f}'.lstrip('0').rstrip('0'))
+            ax.scatter(f.n, f.k, f.z_bytes, c='darkorange', edgecolors='black', linewidths=.25, s=6, zorder=1, label='False Positive\nRate = ' + f'{max_f}'.lstrip('0').rstrip('0'))
 
-        ax.set(xlim=(0, n_max), ylim=(1, k_max), zlim=(0, s_bytes_max),
+        ax.set(xlim=(0, n_max), ylim=(1, k_max), zlim=(0, z_bytes_max),
                xlabel='n\nElements Inserted', ylabel='k\nHash Functions', zlabel='z\nCompressed Size\n(bytes)')
         
         ax.xaxis.labelpad = 10
@@ -239,7 +239,7 @@ def graph_optimals(stats: list[BFStats], out_dir: str, max_f: float, min_n: int)
                     optimal = x
                 else:
                     if optimal.z_bytes > 0 and optimal.n >= min_n:
-                        optimals[f'$2^{{{log(m,2):.0f}}}$'][f'({optimal.n},{optimal.k})'] = optimal.s_bytes
+                        optimals[f'$2^{{{log(m,2):.0f}}}$'][f'({optimal.n},{optimal.k})'] = round(optimal.z_bytes)
                     break
 
     fig = plt.figure()
