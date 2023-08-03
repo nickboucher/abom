@@ -1,6 +1,9 @@
 # ABOM-specific files
 *.out
 *.abom
+graphs/
+timing/
+tuning.*
 
 # Object files
 *.o
