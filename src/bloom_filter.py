@@ -36,7 +36,7 @@ class CompressedBloomFilter():
         # Whether objects inserted to filter are already hashed
         self.prehashed = prehashed
 
-    def __hash(self, x: bytes|str) -> list[int]:
+    def __hash(self, x: bytes|str|bitarray) -> list[int]:
         ''' Returns `k` indices into `A` of 0<i<m. `x` must be a SHA3-256 hash in bytes or hex string. '''
         # Convert x to bytes
         if isinstance(x, str):
@@ -44,10 +44,14 @@ class CompressedBloomFilter():
                 x = bytes.fromhex(x)
             else:
                 x = x.encode()
-        # Convert x to bitarray
-        b = bitarray()
-        if self.prehashed:
+        if isinstance(x, bitarray):
+            b = x
+        else:
+            # Convert x to bitarray
+            b = bitarray()
+        if self.prehashed and isinstance(x, bytes):
             b.frombytes(x)
+        if self.prehashed:
             # Compress hash if needed to utilize all bits in hash
             tot_idx_bits = self.k * self.idx_bits
             if len(b) > tot_idx_bits:

@@ -5,7 +5,7 @@ from os.path import isfile
 from subprocess import run
 from tempfile import NamedTemporaryFile
 from abom import ABOM, AbomError
-from helpers import set_verbose, log
+from helpers import set_verbose, log, hash_bits
 
 # Set verbosity
 set_verbose(environ.get('ABOM_VERBOSE') == '1')
@@ -22,7 +22,10 @@ def check(cmd: str|None = None) -> None:
     # Extract Bloom Filter from binary
     binary = argv[1]
     with NamedTemporaryFile() as af:
-        h = argv[2]
+        try:
+            h = hash_bits(argv[2])
+        except ValueError:
+            exit(f"Invalid hash: {argv[2]}.")
         abom = None
         if isfile(f'{binary}.abom'):
             with open(f'{binary}.abom', 'rb') as af:

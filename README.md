@@ -16,9 +16,14 @@ To compile a program with ABOM, run the following command:
 abom CLANG_CMD
 ```
 
+To calculate the hash of a file, run the following command:
+```bash
+abom-hash <file>
+```
+
 To check whether a certain dependency is present in the ABOM-compiled program, run the following command:
 ```bash
-abom-check <binary> <dependency>
+abom-check <binary> <dependency_hash>
 ```
 
 To enable verbose logging, set the environment variable `ABOM_VERBOSE` to `1`, e.g.:

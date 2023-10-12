@@ -28,6 +28,7 @@ setuptools.setup(
         'console_scripts': [
             'abom=build:build',
             'abom-check=check:check',
+            'abom-hash=hash:abom_hash',
             'abom-tuning=utils.tuning:main'
         ],
     },

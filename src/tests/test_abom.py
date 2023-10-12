@@ -4,13 +4,11 @@ from tempfile import NamedTemporaryFile
 from os.path import realpath, dirname, join
 from contextlib import redirect_stdout
 from io import StringIO
-from random import choices
-from string import ascii_lowercase, digits
+from random import randbytes
 from warnings import catch_warnings, simplefilter
-from hashlib import file_digest
 from build import build
 from check import check
-from helpers import AbomMissingWarning
+from helpers import AbomMissingWarning, hash_hex, INDEX_BYTES
 
 class TestAbom(TestCase):
     
@@ -25,9 +23,7 @@ class TestAbom(TestCase):
         if not checksums:
             checksums = []
             for target in targets:
-                with open(self.resource(target), 'rb') as f:
-                    hash = file_digest(f, "sha3_256")
-                    checksums.append(hash.hexdigest())
+                checksums.append(hash_hex(self.resource(target)))
 
         with NamedTemporaryFile() as temp:
             # Test compiling
@@ -50,7 +46,7 @@ class TestAbom(TestCase):
                 self.assertEqual('Present', stdout.getvalue().strip())
 
             # Test abom-check (Absent)
-            check_cmd = f'abom-check {temp.name} {"".join(choices(ascii_lowercase + digits, k=64))}'
+            check_cmd = f'abom-check {temp.name} {randbytes(INDEX_BYTES).hex()}'
             with redirect_stdout(StringIO()) as stdout:
                 try:
                     check(check_cmd)
@@ -66,9 +62,7 @@ class TestAbom(TestCase):
         if not checksums:
             checksums = []
             for target in targets:
-                with open(self.resource(target), 'rb') as f:
-                    hash = file_digest(f, "sha3_256")
-                    checksums.append(hash.hexdigest())
+                checksums.append(hash_hex(self.resource(target)))
         
         files = list(map(lambda x: (x,NamedTemporaryFile()), targets))
 
@@ -103,7 +97,7 @@ class TestAbom(TestCase):
                 self.assertEqual('Present', stdout.getvalue().strip())
 
             # Test abom-check (Absent)
-            check_cmd = f'abom-check {out.name} {"".join(choices(ascii_lowercase + digits, k=64))}'
+            check_cmd = f'abom-check {out.name} {randbytes(INDEX_BYTES).hex()}'
             with redirect_stdout(StringIO()) as stdout:
                 try:
                     check(check_cmd)

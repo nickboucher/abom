@@ -32,7 +32,7 @@ class ABOM():
     def __init__(self):
         self.bfs = []
 
-    def insert(self, x: bytes|str) -> 'ABOM':
+    def insert(self, x: bytes|str|bitarray) -> 'ABOM':
         ''' Inserts `x` into the ABOM using syntax `abom.insert(x)`. '''
         for bf in self.bfs:
             if ~bf < self.f:
@@ -138,6 +138,6 @@ class ABOM():
         ''' Updates the ABOM to be the union of itself and `abom` using syntax `abom |= abom2`. '''
         return self.union(abom)
     
-    def __contains__(self, x: bytes|str) -> bool:
+    def __contains__(self, x: bytes|str|bitarray) -> bool:
         ''' Returns True if `x` is in the ABOM using syntax `x in abom`. '''
         return self.contains(x)

@@ -4,11 +4,10 @@ from sys import argv as sysargv, exit
 from subprocess import run
 from shlex import split as shlex_split, join as shlex_join
 from os import environ
-from hashlib import file_digest
 from tempfile import NamedTemporaryFile
 from os.path import isfile
 from shutil import copyfile
-from helpers import AbomMissingWarning, set_verbose, log
+from helpers import AbomMissingWarning, set_verbose, log, hash
 from abom import ABOM, AbomError
 
 # Define constants
@@ -96,8 +95,7 @@ def build_clang(argv: list[str]) -> None:
     for dep in dependencies:
         if dep.endswith('.s'):
             asm = True
-        with open(dep, 'rb') as f:
-            abom += file_digest(f, "sha3_256").hexdigest()
+        abom += hash(dep)
     if ld:
         abom_union(abom, last[1:], out)
     with NamedTemporaryFile() as af:
