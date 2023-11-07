@@ -8,7 +8,7 @@ from random import randbytes
 from warnings import catch_warnings, simplefilter
 from build import build
 from check import check
-from helpers import AbomMissingWarning, hash_hex, INDEX_BYTES
+from helpers import AbomMissingWarning, hash_hex, INDEX_BYTES, TRAILING_NIBBLE
 
 class TestAbom(TestCase):
     
@@ -46,7 +46,7 @@ class TestAbom(TestCase):
                 self.assertEqual('Present', stdout.getvalue().strip())
 
             # Test abom-check (Absent)
-            check_cmd = f'abom-check {temp.name} {randbytes(INDEX_BYTES).hex()}'
+            check_cmd = f'abom-check {temp.name} {randbytes(INDEX_BYTES).hex()[:-1 if TRAILING_NIBBLE else None]}'
             with redirect_stdout(StringIO()) as stdout:
                 try:
                     check(check_cmd)
@@ -97,7 +97,7 @@ class TestAbom(TestCase):
                 self.assertEqual('Present', stdout.getvalue().strip())
 
             # Test abom-check (Absent)
-            check_cmd = f'abom-check {out.name} {randbytes(INDEX_BYTES).hex()}'
+            check_cmd = f'abom-check {out.name} {randbytes(INDEX_BYTES).hex()[:-1 if TRAILING_NIBBLE else None]}'
             with redirect_stdout(StringIO()) as stdout:
                 try:
                     check(check_cmd)
